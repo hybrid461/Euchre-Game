@@ -12,6 +12,7 @@ class Player:
         self.socket_object = socket_object
         self.teammate = ''
         self.address = address
+        self.hand_preference = ''
 
     def receive_response(self):
         response = self.socket_object.recv(1024).decode()
