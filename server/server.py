@@ -8,7 +8,6 @@ import Player
 import Cards
 from queue import Queue
 
-listen_ip = '0.0.0.0'
 listen_port = 9999
 all_players_connected = False
 team1 = []
@@ -16,6 +15,7 @@ team2 = []
 table_order = []
 player_obj_list = []
 card_discard_pile = []
+process_queue_until_empty: False
 
 
 def player_handle(player_obj, queue):
@@ -46,18 +46,21 @@ def player_handle(player_obj, queue):
             time.sleep(3)
 
     player_obj.send_data('display_message',
-                         '''Teams have been chosen and are as follows, team1: %s and %s. team2: %s and %s.''' %
-                   (team1[0].name, team1[1].name, team2[0].name, team2[1].name))
+                         'Teams have been chosen and are as follows, team1: %s and %s. team2: %s and %s.' %
+                         (team1[0].name, team1[1].name, team2[0].name, team2[1].name))
+
+    while player_obj.hand_preference == '':
+        player_obj.send_data('require_input', 'Do you prefer to sort your hand by? [suit, value] ')
+        hand_pref = player_obj.receive_response().lower()
+        if hand_pref in ['suit', 'value']:
+            player_obj.hand_preference = hand_pref
+            break
 
     while True:
-        while player_obj.hand_preference == '':
-            player_obj.send_data('require_input', 'Do you prefer to sort your hand by? [suit, value] ')
-            hand_pref = player_obj.receive_response().lower()
-            if hand_pref in ['suit', 'value']:
-                player_obj.hand_preference = hand_pref
-                break
-            else:
-                continue
+        if player_obj.hand_preference == 'suit':
+            player_obj.hand.sort(key=lambda l_card: l_card.suit)
+        elif player_obj.hand_preference == 'value':
+            player_obj.hand.sort(key=lambda l_card: l_card.value)
         if not queue.empty():
             task_from_main = queue.get()
             if task_from_main[0] == 'send_data':
@@ -65,7 +68,11 @@ def player_handle(player_obj, queue):
                 player_obj.send_data(task_from_main[1], task_from_main[2])
             else:
                 raise Exception('Received a queue item i have no idea what to do with!: %s' % task_from_main)
-        time.sleep(5)
+        elif player_obj.hand:
+            hand_message = 'Your current hand is a follows: \n' + '\n'.join([x.d_value + ' of ' +
+                                                                         x.suit for x in player_obj.hand])
+            player_obj.send_data('display_message', hand_message)
+        # time.sleep(0.2)
 
     player_obj.socket_object.close()
 
@@ -75,14 +82,14 @@ def choose_teams(player_obj):
     global team2
     while True:
         team_list = player_obj_list.copy()
-        player_obj.send_data('require_input', '''Hello. You have been chosen to pick the teams. 
-                        Please tell me which other player is your teammate. %s, %s, %s [type the name] ''' %
+        player_obj.send_data('require_input', 'Hello. You have been chosen to pick the teams.' +
+                             'Please tell me which other player is your teammate. %s, %s, %s [type the name] ' %
                              (player_obj_list[1].name, player_obj_list[2].name,
                               player_obj_list[3].name))
         p1_teammate_response = player_obj.receive_response()
         # look for the player that p1 responded with. Should only match 1 as names are unique.
         # if no match is found, then p1 mis-typed.
-        team_mate = next((player for player in team_list if player.name == p1_teammate_response), None)
+        team_mate = next((l_player for l_player in team_list if l_player.name == p1_teammate_response), None)
         if team_mate:
             player_obj.teammate = team_mate  # set player1's teammate
             team_mate.teammate = player_obj  # set the other player's teammate as player 1
@@ -107,23 +114,24 @@ def choose_teams(player_obj):
                 break
 
 
-def deal(l_deck, players, l_card_discard_pile):
+def deal(l_deck, l_card_discard_pile):
     l_deck = l_deck + l_card_discard_pile
     if len(l_deck) != 24:
         raise Exception('Card deck length is not 24!')
     random.shuffle(l_deck)
     print('shuffling cards\n')
     while len(l_deck) > 4:
-        for l_player in players:
+        for l_player in table_order:
             l_player.hand.append(l_deck.pop(0))
     print('cards have been dealt\n')
-    return l_deck, []
+    l_card_discard_pile = []
+    return l_deck, l_card_discard_pile
 
 
-def set_turn_order(dealer):
+def set_turn_order(l_dealer):
     global table_order
     table_order = [team1[0], team2[0], team1[1], team2[1]]
-    while table_order.index(dealer) != 3:
+    while table_order.index(l_dealer) != 3:
         # this while statement runs till the dealer is at the end of the list to set the player order.
         shifting = table_order.pop(0)
         table_order.append(shifting)
@@ -136,28 +144,29 @@ def connection_handler():
         # start loop to accept players connections
         client, address = server.accept()
         print('[*] Accepted connection from: %s:%d' % (address[0], address[1]))
-        player = Player.Player(client, address[0])
+        q = Queue()
+        thread_name = 'player%d_thread' % (player_count + 1)
+        l_player = Player.Player(client, address[0], q, thread_name)
         if player_count < 4:
             # spin up our client thread to handle each of the players
-            player_obj_list.append(player)
-            q = Queue()
-            client_handler = threading.Thread(target=player_handle, args=(player, q))
+            player_obj_list.append(l_player)
+            client_handler = threading.Thread(target=player_handle, args=(l_player, q), name=thread_name )
             client_handler.start()
             player_count += 1
         else:
             # because of the while loop condition, I don't think this else can occur, but just in case.
             player.send_data('display_message', 'Sorry, full on players. Try again next time.')
             client.close()
-            del player
-
-
+            del l_player
 
 
 print('Euchre server starting!\n')
 deck = Cards.build_deck()
-
+random.shuffle(deck)
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind((listen_ip, listen_port))
+server.setsockopt(socket.SO_REUSEADDR)
+# server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
+server.bind((socket.gethostname(), listen_port))
 server.listen(5)
 print('Listening on %s:%d\n' % (listen_ip, listen_port))
 conn_handler = threading.Thread(target=connection_handler)
@@ -179,7 +188,10 @@ while len(team1) < 2 and len(team2) < 2: # see if we can change to a thread.lock
     time.sleep(2)
 
 # determine first dealer
-while len(deck) > 0:
+dealer = None
+process_queue_until_empty = True
+while not dealer:
+    queue_first = True
     for player in player_obj_list:
         card = deck.pop(0)
         card_discard_pile.append(card)
@@ -187,15 +199,15 @@ while len(deck) > 0:
             dealer = player
             for b_player in player_obj_list:
                 b_player.queue.put(('send_data', 'display_message', '%s got %s and will be the first dealer.' %
-                                    (player, '%s of %s' % (card.d_value, card.suit))))
+                                    (player.name, '%s of %s' % (card.d_value, card.suit))))
             set_turn_order(dealer)
             break
         else:
             for c_player in player_obj_list:
-                c_player.queue.put(('send_data', 'display_message', '%s got %s' % (player, '%s of %s' %
+                c_player.queue.put(('send_data', 'display_message', '%s got %s' % (player.name, '%s of %s' %
                                                                                    (card.d_value, card.suit))))
 
-deck, card_discard_pile = deal(deck, table_order)
+deck, card_discard_pile = deal(deck, card_discard_pile)
 for x in player_obj_list:
     print('player %s hand:' % x.name)
     for card in x.hand:
@@ -205,6 +217,6 @@ while True:
     # print('Team2: ', team2)
     time.sleep(5)
 # todo
-# - let player pick hand display order. Done, now to actually sort the cards.
+# - let player pick hand display order. Done. needs testing.
 # - first black jack deals. done. needs testing.
 # - change if/while checks to thread locks if possible.

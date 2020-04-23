@@ -2,7 +2,7 @@ import json
 
 
 class Player:
-    def __init__(self, socket_object, address):
+    def __init__(self, socket_object, address, q, thread_name=''):
         """
         :param socket_object: pass a socket object opened with a client after running socket.accept()
         :param address: The IP address of the client for logging purposes
@@ -13,10 +13,12 @@ class Player:
         self.teammate = ''
         self.address = address
         self.hand_preference = ''
+        self.queue = q
+        self.thread_name = thread_name
 
     def receive_response(self):
         response = self.socket_object.recv(1024).decode()
-        print('Received request: %s from: %s' % (response, self.address))
+        print('%s - Received request: %s from: %s' % (self.thread_name, response, self.address))
         return response
 
     def send_data(self, instruction, message):
@@ -31,7 +33,7 @@ class Player:
         player_request = {'instruction': instruction, 'message': message}
         data = json.dumps(player_request)
         self.socket_object.send(data.encode())
-        print('Sent data: %s to: %s' % (data, self.address))
+        print('%s - Sent data: %s to: %s' % (self.thread_name, data, self.address))
 
 
 if __name__ == '__main__':
