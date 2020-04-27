@@ -6,6 +6,25 @@ import json
 
 server_ip = '192.168.50.128'
 server_port = 9999
+header_length = 10
+
+
+def receive_data():
+    response_header = client.recv(header_length)
+    if not len(response_header):
+        return None
+    response_length = int(response_header.decode().strip())
+    # print('DEBUG: ', type(response_length), response_length)
+    data = b''
+    while len(data) < response_length:
+        packet = client.recv(response_length - len(data))
+        if not packet:
+            return None
+        data += packet
+    data = data.decode()
+    # print('DEBUG: ', type(data), data, 'length: %d' % len(data))
+    return data
+
 
 # create the socket object
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -20,23 +39,12 @@ except Exception as e:
 
 # main loop
 while True:
-    response = client.recv(4096).decode()
-    # print('DEBUG: ', type(response), response)
-    if response == '':
-        print('Server closed connection.')
-        break
-    json_list = response.split('}{')
-    for item in json_list:
-        # this next bit of code handles where two or more json requests are received
-        if not item.startswith('{'):
-            item = '{' + item
-        if not item.endswith('}'):
-            item = item + '}'
-        try:
-            message_dict = json.loads(item)
-        except json.decoder.JSONDecodeError:
-            print('json decode error with item: %s. full data off socket: %s' % (item, response))
-        # print(type(message_dict), message_dict)
+    response = receive_data()
+    if not response:
+        print('Server closed connection')
+        sys.exit()
+    else:
+        message_dict = json.loads(response)
         try:
             if message_dict['instruction'] == 'display_message':
                 print(message_dict['message'])
@@ -45,7 +53,9 @@ while True:
                 while len(player_input) > 255:
                     print('Not accepting data longer than 255 characters, enter again.\n')
                     player_input = input(message_dict['message'])
-                client.send(player_input.encode())
+                data_header = f'{len(player_input):<{header_length}}'
+                msg = data_header + player_input
+                client.send(msg.encode())
             else:
                 print('instruction invalid.')
         except Exception as e:

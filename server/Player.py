@@ -2,10 +2,13 @@ import json
 
 
 class Player:
-    def __init__(self, socket_object, address, q, thread_name=''):
+    def __init__(self, socket_object, address, q, thread_name='', sock_header_length=10):
         """
         :param socket_object: pass a socket object opened with a client after running socket.accept()
         :param address: The IP address of the client for logging purposes
+        :param q: queue object for passing data to Player
+        :param thread_name: used for identifying print strings. default is an empty string
+        :param sock_header_length: used to specify a header length for data sent to the players. Default is 10.
         """
         self.name = ''
         self.hand = []
@@ -15,11 +18,22 @@ class Player:
         self.hand_preference = ''
         self.queue = q
         self.thread_name = thread_name
+        self.sock_header_length = sock_header_length
 
     def receive_response(self):
-        response = self.socket_object.recv(1024).decode()
-        print('%s - Received request: %s from: %s' % (self.thread_name, response, self.address))
-        return response
+        response_header = self.socket_object.recv(self.sock_header_length)
+        if not len(response_header):
+            print('Player %s closed connection' % self.name)
+        response_length = int(response_header.decode().strip())
+        data = b''
+        while len(data) < response_length:
+            packet = self.socket_object.recv(response_length - len(data))
+            if not packet:
+                return None
+            data += packet
+        data = data.decode()
+        print('%s - Received request: %s from: %s' % (self.thread_name, data, self.address))
+        return data
 
     def send_data(self, instruction, message):
         """
@@ -32,8 +46,11 @@ class Player:
             raise ValueError("Invalid instruction. Expected one of: %s" % instructions)
         player_request = {'instruction': instruction, 'message': message}
         data = json.dumps(player_request)
-        self.socket_object.send(data.encode())
-        print('%s - Sent data: %s to: %s' % (self.thread_name, data, self.address))
+        data_header = f'{len(data):<{self.sock_header_length}}'
+        msg = data_header + data
+        self.socket_object.send(msg.encode())
+        print('%s - Sent data: %s to: %s. length: %d encode_len: %d' % (self.thread_name, msg, self.address,
+                                                                        len(msg), len(msg.encode())))
 
 
 if __name__ == '__main__':

@@ -8,6 +8,7 @@ import Player
 import Cards
 from queue import Queue
 
+listen_ip = '192.168.50.128'
 listen_port = 9999
 all_players_connected = False
 team1 = []
@@ -16,6 +17,7 @@ table_order = []
 player_obj_list = []
 card_discard_pile = []
 process_queue_until_empty: False
+header_length = 10
 
 
 def player_handle(player_obj, queue):
@@ -164,9 +166,7 @@ print('Euchre server starting!\n')
 deck = Cards.build_deck()
 random.shuffle(deck)
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.setsockopt(socket.SO_REUSEADDR)
-# server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
-server.bind((socket.gethostname(), listen_port))
+server.bind((listen_ip, listen_port))
 server.listen(5)
 print('Listening on %s:%d\n' % (listen_ip, listen_port))
 conn_handler = threading.Thread(target=connection_handler)
