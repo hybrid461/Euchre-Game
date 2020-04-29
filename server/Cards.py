@@ -30,4 +30,4 @@ all_cards = {'Two': 2, 'Three': 3, 'Four': 4, 'Five': 5, 'Six': 6, 'Seven': 7, '
              'Nine': 9, 'Ten': 10, 'Jack': 11, 'Queen': 12, 'King': 13, 'Ace': 14}
 euchre_cards = {'Nine': 9, 'Ten': 10, 'Jack': 11, 'Queen': 12, 'King': 13, 'Ace': 14}
 if __name__ == '__main__':
-    print('Cards class and build_deck function. import into another script to use.')
+    print('Cards class and build_deck function. import into another script to use. or run server.py')
