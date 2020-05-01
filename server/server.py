@@ -13,8 +13,6 @@ from queue import Queue
 listen_ip = '192.168.50.128'
 listen_port = 9999
 all_players_connected = False
-team1 = []
-team2 = []
 player_obj_list = []
 card_discard_pile = []
 header_length = 10
@@ -46,36 +44,37 @@ def player_handle(player_obj, l_condition):
         l_condition.wait()  # waiting for main to tell us all players have connected and provided names
         logging.debug('all players connected. lock clear.')
     if player_obj is player_obj_list[0]:
+        choose_teams(player_obj)
         with l_condition:
-            choose_teams(player_obj)
             # tell main thread to continue; teams have been chosen
             l_condition.notify()
     else:
-        while len(team1) < 2 and len(team2) < 2:
+        while len(euchre.team1) < 2 and len(euchre.team2) < 2:
             # loop to notify other players that p1 is choosing teams
             player_obj.send_data('display_message', 'Waiting on %s to pick the teams.' % player_obj_list[0].name)
             time.sleep(5)
 
     player_obj.send_data('display_message',
                          'Teams have been chosen and are as follows, team1: %s and %s. team2: %s and %s.' %
-                         (team1[0].name, team1[1].name, team2[0].name, team2[1].name))
-    # with l_condition:
-    #     l_condition.wait()
-    while not dealer and not player_obj.queue.empty():
-        # this loop is for displaying the first black jack deals cards to the players
-        task_from_main = player_obj.queue.get()
-        if task_from_main[0] == 'send_data':
-            # doesnt yet account for scenarios where we ask for input
-            player_obj.send_data(task_from_main[1], task_from_main[2])
-        else:
-            raise Exception('Received a queue item i have no idea what to do with!: %s' % task_from_main)
+                         (euchre.team1[0].name, euchre.team1[1].name, euchre.team2[0].name, euchre.team2[1].name))
+    euchre.player_order = [euchre.team1[0], euchre.team1[1], euchre.team2[0], euchre.team2[1]]
 
-    while player_obj.hand_preference == '':
-        player_obj.send_data('require_input', 'Do you prefer to sort your hand by? [suit, value] ')
-        hand_pref = player_obj.receive_response().lower()
-        if hand_pref in ['suit', 'value']:
-            player_obj.hand_preference = hand_pref
-            break
+    # while not dealer and not player_obj.queue.empty():
+    #     # this loop is for displaying the first black jack deals cards to the players
+    #     task_from_main = player_obj.queue.get()
+    #     task_from_main[0](task_from_main[1])
+    # if task_from_main[0] == 'send_data':
+    #     # doesnt yet account for scenarios where we ask for input
+    #     player_obj.send_data(task_from_main[1], task_from_main[2])
+    # else:
+    #     raise Exception('Received a queue item i have no idea what to do with!: %s' % task_from_main)
+
+    # while player_obj.hand_preference == '':
+    #     player_obj.send_data('require_input', 'Do you prefer to sort your hand by? [suit, value] ')
+    #     hand_pref = player_obj.receive_response().lower()
+    #     if hand_pref in ['suit', 'value']:
+    #         player_obj.hand_preference = hand_pref
+    #         break
 
     temp_display_hand = True
     while True:
@@ -86,8 +85,12 @@ def player_handle(player_obj, l_condition):
         if not player_obj.queue.empty():
             task_from_main = player_obj.queue.get()
             if task_from_main[0] == 'send_data':
-                # doesnt yet account for scenarios where we ask for input
                 player_obj.send_data(task_from_main[1], task_from_main[2])
+                if task_from_main[1] == 'require_input':
+                    player_resp = player_obj.receive_response()
+                    euchre.queue.put(player_resp)
+            elif task_from_main[0] == 'send_line_separator':
+                player_obj.send_line_separator()
             else:
                 raise Exception('Received a queue item i have no idea what to do with!: %s' % task_from_main)
         elif player_obj.hand and temp_display_hand:
@@ -101,8 +104,6 @@ def player_handle(player_obj, l_condition):
 
 
 def choose_teams(player_obj):
-    global team1
-    global team2
     while True:
         team_list = player_obj_list.copy()
         player_obj.send_data('require_input', 'Hello. You have been chosen to pick the teams.' +
@@ -132,8 +133,8 @@ def choose_teams(player_obj):
                                                                team2_temp[1].name))
             team_response_confirm = player_obj.receive_response()
             if team_response_confirm == 'y':
-                team1 = team1_temp
-                team2 = team2_temp
+                euchre.team1 = team1_temp
+                euchre.team2 = team2_temp
                 break
 
 
@@ -168,6 +169,7 @@ server.listen(5)
 logging.info('Listening on %s:%d' % (listen_ip, listen_port))
 
 condition = threading.Condition()
+euchre = Euchre.Euchre()
 conn_handler = threading.Thread(target=connection_handler, args=(condition,), name='conn_thread')
 conn_handler.start()
 logging.debug('connection_handler thread started')
@@ -188,15 +190,14 @@ with condition:
     # waiting on teams to be chosen
     condition.wait()
 
-dealer, deck, card_discard_pile = Euchre.get_first_dealer(player_obj_list, deck, card_discard_pile)
 
-table_order = Euchre.set_turn_order(dealer, team1, team2)
-deck, card_discard_pile = Euchre.deal(deck, card_discard_pile, table_order)
+deck, card_discard_pile = euchre.get_first_dealer(deck, card_discard_pile)
+euchre.set_turn_order()
+deck, card_discard_pile = Euchre.deal(deck, card_discard_pile, euchre.player_order) # deck is kitty, discard pile is empty
+card_discard_pile = euchre.pick_trump(deck)
 
 while True:
-    # print('Team1: ', team1)
-    # print('Team2: ', team2)
+
     time.sleep(5)
 # todo
-# - first black jack deals. done. needs testing.
-# - change if/while checks to thread locks if possible.
+# - hand didnt display before first player has to pass/pick trump

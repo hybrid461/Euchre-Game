@@ -52,6 +52,17 @@ class Player:
         self.logger.info('Sent data: %s to: %s. length: %d encode_len: %d' % (msg, self.address,
                                                                         len(msg), len(msg.encode())))
 
+    def send_line_separator(self, newlines=True):
+        """
+        send a line separator created with = to the player.
+        :param newlines: default: True. Include a blank line before and after the separator
+        :return: None.
+        """
+        if newlines:
+            self.send_data('display_message', '\n' + '=' * 80 + '\n')
+        else:
+            self.send_data('display_message', '=' * 80)
+
 
 if __name__ == '__main__':
     print('Player class. import into another script to use. or run server.py')
