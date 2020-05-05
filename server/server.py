@@ -8,12 +8,10 @@ import Player
 import Cards
 import Euchre
 import logging
-from queue import Queue
 
 listen_ip = '192.168.50.128'
 listen_port = 9999
 all_players_connected = False
-player_obj_list = []
 card_discard_pile = []
 header_length = 10
 dealer = ''
@@ -28,7 +26,7 @@ def player_handle(player_obj, l_condition):
     player_obj.send_data('require_input', 'Welcome. What would you like your player name to be? [1-30 chars] ')
     while True:
         player_name = player_obj.receive_response().lower()
-        if any(player for player in player_obj_list if player.name == player_name):
+        if any(player for player in euchre.player_order if player.name == player_name):
             player_obj.send_data('require_input',
                            'This name has been chosen, please choose something unique. [1-30 chars] ')
         elif 0 < len(player_name) < 31:  # check length for extra precaution.
@@ -43,7 +41,7 @@ def player_handle(player_obj, l_condition):
         logging.debug('Waiting for notification from main that all players have connected.')
         l_condition.wait()  # waiting for main to tell us all players have connected and provided names
         logging.debug('all players connected. lock clear.')
-    if player_obj is player_obj_list[0]:
+    if player_obj is euchre.player_order[0]:
         choose_teams(player_obj)
         with l_condition:
             # tell main thread to continue; teams have been chosen
@@ -51,65 +49,36 @@ def player_handle(player_obj, l_condition):
     else:
         while len(euchre.team1) < 2 and len(euchre.team2) < 2:
             # loop to notify other players that p1 is choosing teams
-            player_obj.send_data('display_message', 'Waiting on %s to pick the teams.' % player_obj_list[0].name)
+            player_obj.send_data('display_message', 'Waiting on %s to pick the teams.' % euchre.player_order[0].name)
             time.sleep(5)
 
     player_obj.send_data('display_message',
                          'Teams have been chosen and are as follows, team1: %s and %s. team2: %s and %s.' %
                          (euchre.team1[0].name, euchre.team1[1].name, euchre.team2[0].name, euchre.team2[1].name))
-    euchre.player_order = [euchre.team1[0], euchre.team1[1], euchre.team2[0], euchre.team2[1]]
-
-    # while not dealer and not player_obj.queue.empty():
-    #     # this loop is for displaying the first black jack deals cards to the players
-    #     task_from_main = player_obj.queue.get()
-    #     task_from_main[0](task_from_main[1])
-    # if task_from_main[0] == 'send_data':
-    #     # doesnt yet account for scenarios where we ask for input
-    #     player_obj.send_data(task_from_main[1], task_from_main[2])
-    # else:
-    #     raise Exception('Received a queue item i have no idea what to do with!: %s' % task_from_main)
-
-    # while player_obj.hand_preference == '':
-    #     player_obj.send_data('require_input', 'Do you prefer to sort your hand by? [suit, value] ')
-    #     hand_pref = player_obj.receive_response().lower()
-    #     if hand_pref in ['suit', 'value']:
-    #         player_obj.hand_preference = hand_pref
-    #         break
-
-    temp_display_hand = True
     while True:
-        if player_obj.hand_preference == 'suit' and len(player_obj.hand) > 1:
-            player_obj.hand.sort(key=lambda l_card: l_card.suit)
-        elif player_obj.hand_preference == 'value' and len(player_obj.hand) > 1:
-            player_obj.hand.sort(key=lambda l_card: l_card.value)
-        if not player_obj.queue.empty():
-            task_from_main = player_obj.queue.get()
-            if task_from_main[0] == 'send_data':
-                player_obj.send_data(task_from_main[1], task_from_main[2])
-                if task_from_main[1] == 'require_input':
-                    player_resp = player_obj.receive_response()
-                    euchre.queue.put(player_resp)
+        if not player_obj.queue_in.empty():
+            task_from_main = player_obj.queue_in.get()
+            if task_from_main[0] == 'display_message':
+                player_obj.send_data(task_from_main[0], task_from_main[1])
+            elif task_from_main[0] == 'require_input':
+                player_obj.send_data(task_from_main[0], task_from_main[1])
+                player_obj.queue_out.put(player_obj.receive_response())
             elif task_from_main[0] == 'send_line_separator':
                 player_obj.send_line_separator()
             else:
-                raise Exception('Received a queue item i have no idea what to do with!: %s' % task_from_main)
-        elif player_obj.hand and temp_display_hand:
-            hand_message = 'Your current hand is a follows: \n' + '\n'.join([x.d_value + ' of ' +
-                                                                         x.suit for x in player_obj.hand])
-            player_obj.send_data('display_message', hand_message)
-            temp_display_hand = False
-        # time.sleep(0.2)
+                raise Exception('Received a queue_in item i have no idea what to do with!: %s' % task_from_main)
+
 
     player_obj.socket_object.close()
 
 
 def choose_teams(player_obj):
     while True:
-        team_list = player_obj_list.copy()
+        team_list = euchre.player_order.copy()
         player_obj.send_data('require_input', 'Hello. You have been chosen to pick the teams.' +
                              'Please tell me which other player is your teammate. %s, %s, %s [type the name] ' %
-                             (player_obj_list[1].name, player_obj_list[2].name,
-                              player_obj_list[3].name))
+                             (euchre.player_order[1].name, euchre.player_order[2].name,
+                              euchre.player_order[3].name))
         p1_teammate_response = player_obj.receive_response()
         # look for the player that p1 responded with. Should only match 1 as names are unique.
         # if no match is found, then p1 mis-typed.
@@ -136,6 +105,7 @@ def choose_teams(player_obj):
                 euchre.team1 = team1_temp
                 euchre.team2 = team2_temp
                 break
+    euchre.player_order = [euchre.team1[0], euchre.team2[0], euchre.team1[1], euchre.team2[1]]
 
 
 def connection_handler(l_condition):
@@ -144,12 +114,11 @@ def connection_handler(l_condition):
         # start loop to accept players connections
         client, address = server.accept()
         logging.info('[*] Accepted connection from: %s:%d' % (address[0], address[1]))
-        q = Queue()
         thread_name = 'player%d_thread' % (player_count + 1)
-        l_player = Player.Player(client, address[0], q)
+        l_player = Player.Player(client, address[0])
         if player_count < 4:
             # spin up our client thread to handle each of the players
-            player_obj_list.append(l_player)
+            euchre.player_order.append(l_player)
             client_handler = threading.Thread(target=player_handle, args=(l_player, l_condition), name=thread_name)
             client_handler.start()
             player_count += 1
@@ -158,6 +127,36 @@ def connection_handler(l_condition):
             l_player.send_data('display_message', 'Sorry, full on players. Try again next time.')
             client.close()
             del l_player
+
+
+def display_hand(l_player):
+    """
+    sorts the hand as the player has specified, and constructs a message to be sent to the player, adds to their queue
+    :return None: 
+    """
+    if l_player.hand_preference == 'suit' and len(l_player.hand) > 1:
+        l_player.hand.sort(key=lambda l_card: l_card.suit)
+    elif l_player.hand_preference == 'value' and len(l_player.hand) > 1:
+        l_player.hand.sort(key=lambda l_card: l_card.value)
+    else:
+        raise Exception('Player has no hand to display')
+    hand_message = 'Your current hand is a follows: \n' + '\n'.join([x.d_value + ' of ' +
+                                                                     x.suit for x in l_player.hand])
+    l_player.queue_in.put(['display_message', hand_message])
+
+
+def show_all_players_their_hands():
+    for l_player in euchre.player_order:
+        display_hand(l_player)
+
+
+def player_choose_hand_pref(l_player):
+    while l_player.hand_preference == '':
+        l_player.queue_in.put(['require_input', 'Do you prefer to sort your hand by? [suit, value] '])
+        hand_pref = l_player.queue_out.get()
+        if hand_pref in ['suit', 'value']:
+            l_player.hand_preference = hand_pref
+            break
 
 
 logging.info('Euchre server starting!')
@@ -179,7 +178,7 @@ player_name_count = 0
 
 while player_name_count < 4:
     logging.info('watching player count')
-    player_name_count = sum(x.name != '' for x in player_obj_list)
+    player_name_count = sum(x.name != '' for x in euchre.player_order)
     logging.info('Players connected: %d\n' % player_name_count)
     time.sleep(3)
 with condition:
@@ -193,11 +192,23 @@ with condition:
 
 deck, card_discard_pile = euchre.get_first_dealer(deck, card_discard_pile)
 euchre.set_turn_order()
-deck, card_discard_pile = Euchre.deal(deck, card_discard_pile, euchre.player_order) # deck is kitty, discard pile is empty
+temp_threads = []
+for player_obj in euchre.player_order:
+    hand_order_thread = threading.Thread(target=player_choose_hand_pref, args=(player_obj,))
+    hand_order_thread.start()
+    temp_threads.append(hand_order_thread)
+for thread in temp_threads:
+    thread.join()
+
+deck, card_discard_pile = Euchre.deal(deck, card_discard_pile, euchre.player_order)
+# deck is kitty, discard pile is empty
+show_all_players_their_hands()
 card_discard_pile = euchre.pick_trump(deck)
+# remainder of kitty returned
 
 while True:
 
     time.sleep(5)
 # todo
-# - hand didnt display before first player has to pass/pick trump
+# - if player passes on trump, send info to all players
+# - dont forget option to defend alone

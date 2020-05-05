@@ -1,9 +1,9 @@
 import json
 import logging
-
+from queue import Queue
 
 class Player:
-    def __init__(self, socket_object, address, q, sock_header_length=10):
+    def __init__(self, socket_object, address, sock_header_length=10):
         """
         :param socket_object: pass a socket object opened with a client after running socket.accept()
         :param address: The IP address of the client for logging purposes
@@ -16,7 +16,8 @@ class Player:
         self.teammate = ''
         self.address = address
         self.hand_preference = ''
-        self.queue = q
+        self.queue_in = Queue()
+        self.queue_out = Queue()
         self.sock_header_length = sock_header_length
         self.logger = logging.getLogger()
 
