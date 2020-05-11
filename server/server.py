@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-import random
 import socket
 import threading
 import time
 import Player
-import Cards
 import Euchre
 import logging
 
@@ -32,6 +30,13 @@ def player_handle(player_obj, l_condition):
         elif 0 < len(player_name) < 31:  # check length for extra precaution.
             player_obj.name = player_name
             player_obj.send_data('display_message', 'Name accepted. Waiting for all players to join.')
+            while player_obj.hand_preference == '':
+                player_obj.send_data('require_input', 'Do you prefer to sort your hand by? [suit, value] ')
+                hand_pref = player_obj.receive_response()
+                if hand_pref in ['suit', 'value']:
+                    player_obj.hand_preference = hand_pref
+                    player_obj.send_data('display_message', 'Thank you. Waiting for all players to join.')
+                    break
             break
         else:
             player_obj.send_data('require_input', 'Name not appropriate, select something else. [1-30 chars] ')
@@ -75,7 +80,7 @@ def player_handle(player_obj, l_condition):
 def choose_teams(player_obj):
     while True:
         team_list = euchre.player_order.copy()
-        player_obj.send_data('require_input', 'Hello. You have been chosen to pick the teams.' +
+        player_obj.send_data('require_input', 'Hello. You have been chosen to pick the teams. ' +
                              'Please tell me which other player is your teammate. %s, %s, %s [type the name] ' %
                              (euchre.player_order[1].name, euchre.player_order[2].name,
                               euchre.player_order[3].name))
@@ -129,39 +134,7 @@ def connection_handler(l_condition):
             del l_player
 
 
-def display_hand(l_player):
-    """
-    sorts the hand as the player has specified, and constructs a message to be sent to the player, adds to their queue
-    :return None: 
-    """
-    if l_player.hand_preference == 'suit' and len(l_player.hand) > 1:
-        l_player.hand.sort(key=lambda l_card: l_card.suit)
-    elif l_player.hand_preference == 'value' and len(l_player.hand) > 1:
-        l_player.hand.sort(key=lambda l_card: l_card.value)
-    else:
-        raise Exception('Player has no hand to display')
-    hand_message = 'Your current hand is a follows: \n' + '\n'.join([x.d_value + ' of ' +
-                                                                     x.suit for x in l_player.hand])
-    l_player.queue_in.put(['display_message', hand_message])
-
-
-def show_all_players_their_hands():
-    for l_player in euchre.player_order:
-        display_hand(l_player)
-
-
-def player_choose_hand_pref(l_player):
-    while l_player.hand_preference == '':
-        l_player.queue_in.put(['require_input', 'Do you prefer to sort your hand by? [suit, value] '])
-        hand_pref = l_player.queue_out.get()
-        if hand_pref in ['suit', 'value']:
-            l_player.hand_preference = hand_pref
-            break
-
-
 logging.info('Euchre server starting!')
-deck = Cards.build_deck()
-random.shuffle(deck)
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((listen_ip, listen_port))
 server.listen(5)
@@ -189,26 +162,15 @@ with condition:
     # waiting on teams to be chosen
     condition.wait()
 
-
-deck, card_discard_pile = euchre.get_first_dealer(deck, card_discard_pile)
-euchre.set_turn_order()
-temp_threads = []
-for player_obj in euchre.player_order:
-    hand_order_thread = threading.Thread(target=player_choose_hand_pref, args=(player_obj,))
-    hand_order_thread.start()
-    temp_threads.append(hand_order_thread)
-for thread in temp_threads:
-    thread.join()
-
-deck, card_discard_pile = Euchre.deal(deck, card_discard_pile, euchre.player_order)
-# deck is kitty, discard pile is empty
-show_all_players_their_hands()
-card_discard_pile = euchre.pick_trump(deck)
-# remainder of kitty returned
+euchre.start_game()
+euchre.start_round()
 
 while True:
 
     time.sleep(5)
 # todo
-# - if player passes on trump, send info to all players
-# - dont forget option to defend alone
+# - account for no one picking first trump option
+# - dont forget option to defend alone -- needs testing.
+# -- in pick_trump, set the off/def teams
+# -- change go_alone so that it checks with all players once trump is decided, starting with the player that chose trump.
+# - at some point, some form of sessionizing the players.

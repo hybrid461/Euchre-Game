@@ -2,6 +2,7 @@ import json
 import logging
 from queue import Queue
 
+
 class Player:
     def __init__(self, socket_object, address, sock_header_length=10):
         """
@@ -63,6 +64,21 @@ class Player:
             self.send_data('display_message', '\n' + '=' * 80 + '\n')
         else:
             self.send_data('display_message', '=' * 80)
+
+    def display_hand(self):
+        """
+        sorts the hand as the player has specified, and constructs a message to be sent to the player, adds to their queue
+        :return None: 
+        """
+        if self.hand_preference == 'suit' and len(self.hand) > 1:
+            self.hand.sort(key=lambda l_card: l_card.suit)
+        elif self.hand_preference == 'value' and len(self.hand) > 1:
+            self.hand.sort(key=lambda l_card: l_card.value)
+        else:
+            raise Exception('Player has no hand to display')
+        hand_message = 'Your current hand is a follows: \n' + '\n'.join([x.d_value + ' of ' +
+                                                                         x.suit for x in self.hand])
+        self.queue_in.put(['display_message', hand_message])
 
 
 if __name__ == '__main__':
