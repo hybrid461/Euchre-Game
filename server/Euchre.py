@@ -2,26 +2,26 @@ import random
 import logging
 import time
 import Cards
+import re
 
 module_logger = logging.getLogger()
 
 class Euchre:
     def __init__(self):
         self.dealer = ''
-        self.trump = ''
         self.player_order = []
         self.team1 = []
         self.team2 = []
+        self.team1_points = 0
+        self.team2_points = 0
         self.deck = Cards.build_deck()
         self.card_discard_pile = []
-        self._round_off_team = None
-        self._round_def_team = None
-        self._round_turn_order = []
-        self._round_kitty = []
+        self.gameplay_obj = None
 
     def start_game(self):
         random.shuffle(self.deck)
         self.get_first_dealer()
+        self.start_round()
 
     def get_first_dealer(self):
         """
@@ -55,17 +55,35 @@ class Euchre:
         module_logger.info('Dealer is: ' + self.dealer.name)
 
     def start_round(self):
-        self.set_player_order()
-        self.deal()
-        self.show_all_players_their_hands()
-        trump_chooser = self.pick_trump()
-        if not trump_chooser:
-            # onto next dealer
-            pass
+        while self.team1_points < 10 or self.team2_points < 10:
+            self.gameplay_obj = Gameplay(self.player_order)
+            self.set_player_order()
+            self.deal()
+            self.show_all_players_their_hands()
+            trump_chooser = self.pick_trump()
+            if not trump_chooser:
+                self.pick_next_dealer()
+                continue
+            else:
+                self._setup_round_teams(trump_chooser)  # must run before build_round_order
+                self.go_alone(trump_chooser)
+                self.build_round_order()
+                self.gameplay_obj.start()
+                self.calc_points()
+                self.card_discard_pile += self.gameplay_obj.discard_pile
+                self.gameplay_obj.discard_pile = []
+                self.pick_next_dealer()
+
+        if self.team1_points > 10:
+            message = 'GAMEOVER. Congratulations to %s and %s for winning with %d points.' % (self.team1[0].name,
+                                                                                             self.team1[1].name,
+                                                                                             self.team1_points)
         else:
-            self._setup_round_teams(trump_chooser)  # must run before adjust_round_order
-            self.go_alone(trump_chooser)
-            self.adjust_round_order()
+            message = 'GAMEOVER. Congratulations to %s and %s for winning with %d points.' % (self.team2[0].name,
+                                                                                             self.team2[1].name,
+                                                                                             self.team2_points)
+        for x_player in self.player_order:
+            x_player.queue_in.put(['display_message', message])
 
     def deal(self):
         l_deck = self.deck + self.card_discard_pile
@@ -83,7 +101,7 @@ class Euchre:
         module_logger.info('cards have been dealt')
         self.card_discard_pile = []
         self.deck = []
-        self._round_kitty = l_deck
+        self.gameplay_obj.round_kitty = l_deck
 
     def show_all_players_their_hands(self):
         for l_player in self.player_order:
@@ -101,48 +119,84 @@ class Euchre:
         module_logger.info('Updated player order: ' + ','.join([x.name for x in self.player_order]))
 
     def pick_trump(self):
-        trump_card = self._round_kitty.pop(0)
-        self.card_discard_pile += self._round_kitty
+        trump_card = self.gameplay_obj.round_kitty.pop(0)
+        self.card_discard_pile += self.gameplay_obj.round_kitty
+        trump_chooser = self._trump_opt_1(trump_card)
+        if not trump_chooser:
+            trump_chooser = self._trump_opt_2(trump_card)
+        return trump_chooser
+    
+    def _trump_opt_1(self, trump_card):
+        """
+        players choose trump based on top card from kitty pile
+        :param trump_card: top card of kitty pile
+        :return: 
+        """
         first_trump_str = '%s of %s' % (trump_card.d_value, trump_card.suit)
-        for l_player in self.player_order:
-            l_player.queue_in.put(['display_message', '%s is up for trump. %s chooses first.' %
-                               (first_trump_str, self.player_order[0].name)])
-        trump_selected = False
         trump_chooser = None
         for l_player in self.player_order:
-            if trump_selected:
-                break
+            l_player.queue_in.put(['display_message', '%s is up for trump. %s chooses first.' %
+                                   (first_trump_str, self.player_order[0].name)])
+        for l_player in self.player_order:
             while True:
                 if self.player_order.index(l_player) != 3:
                     l_player.queue_in.put(['require_input',
-                                        'Have dealer pickup the card, making %s trump or pass? [1 = pickup, 2 = pass] ' %
-                                       trump_card.suit])
+                                           'Have dealer pickup the card, making %s trump or pass? [1 = pickup, 2 = pass] ' %
+                                           trump_card.suit])
                 else:
                     l_player.queue_in.put(['require_input',
-                                        'Do you want to pickup the card, making %s trump or pass ? [1 = pickup, 2 = pass] '
-                                        % trump_card.suit])
+                                           'Do you want to pickup the card, making %s trump or pass ? [1 = pickup, 2 = pass] '
+                                           % trump_card.suit])
                 trump_response = l_player.queue_out.get()
                 if trump_response == '1':
-                    self.trump = trump_card.suit
+                    self.gameplay_obj.trump = trump_card.suit
                     self.dealer_pick_up_card(trump_card, first_trump_str)
                     trump_selected = True
                     trump_chooser = l_player
-                    for x_player in self.player_order:
-                        x_player.queue_in.put(['display_message', '%s has chosen %s as trump for this round' %
-                                               (l_player.name, self.trump)])
-                        x_player.queue_in.put(['send_line_separator'])
+                    self._player_has_chosen_trump(l_player)
                     break
                 elif trump_response == '2':
-                    for x_player in self.player_order:
-                        x_player.queue_in.put(['display_message', '%s has passed.' % l_player.name])
+                    self._player_has_passed(l_player)
                     break
                 else:
                     continue
-        if not trump_selected:
-            pass
-            # need to choose a diff suit for trump
+            if trump_selected:
+                break
         return trump_chooser
-
+    
+    def _trump_opt_2(self, trump_card):
+        """
+        players choose trump based on the suits in their hand. They cannot choose what was passed on from the kitty pile
+        :param trump_card: the card that was on top of the kitty pile.
+        :return: 
+        """
+        trump_chooser = None
+        for l_player in self.player_order:
+            l_player.queue_in.put(['send_line_separator'])
+            l_player.display_hand()
+            options_set = set([x for x in l_player.hand if x.suit != trump_card.suit])
+            options_set.add('pass')
+            trump_option_str = 'Your options for trump are as follows: ['
+            trump_option_str += ', '.join(options_set) + '] '
+            while True:
+                l_player.queue_in.put('require_input', trump_option_str)
+                l_player_resp = l_player.queue_out.get()
+                if l_player_resp not in options_set:
+                    continue
+                else:
+                    if l_player_resp == 'pass':
+                        self._player_has_passed(l_player)
+                        break
+                    else:
+                        trump_selected = True
+                        trump_chooser = l_player
+                        self.gameplay_obj.trump = l_player_resp
+                        self._player_has_chosen_trump(l_player)
+                        break
+            if trump_selected:
+                break
+        return trump_chooser
+                
     def dealer_pick_up_card(self, trump_card, first_trump_str):
         while True:
             dealer_str = 'Which card do you want to replace with %s [enter the number]: \n' % first_trump_str + \
@@ -159,20 +213,20 @@ class Euchre:
                 continue
 
     def go_alone(self, trump_chooser):
-        trump_chooser_index = self._round_off_team.index(trump_chooser)
+        trump_chooser_index = self.gameplay_obj.round_off_team.index(trump_chooser)
         if trump_chooser_index == 0:
             off_teammate_index = 1
         else:
             off_teammate_index = 0
-        off_teammate = self._round_off_team[off_teammate_index]
+        off_teammate = self.gameplay_obj.round_off_team[off_teammate_index]
         o_alone_player = self.go_alone_question([trump_chooser, off_teammate])
         if o_alone_player:
-            self._round_off_team = [o_alone_player]
+            self.gameplay_obj.round_off_team = [o_alone_player]
             for x_player in self.player_order:
                 x_player.queue_in.put(['display_message', '%s has chosen to go alone' % x_player.name])
-        d_alone_player = self.go_alone_question(self._round_def_team)
+        d_alone_player = self.go_alone_question(self.gameplay_obj.round_def_team)
         if d_alone_player:
-            self._round_def_team = [d_alone_player]
+            self.gameplay_obj.round_def_team = [d_alone_player]
             for x_player in self.player_order:
                 x_player.queue_in.put(['display_message', '%s has chosen to go alone' % x_player.name])
 
@@ -186,22 +240,213 @@ class Euchre:
             elif go_alone_response == '2':
                 return l_player
 
+    def _player_has_passed(self, l_player):
+        for x_player in self.player_order:
+            x_player.queue_in.put(['display_message', '%s has passed.' % l_player.name])
+
+    def _player_has_chosen_trump(self, l_player):
+        for x_player in self.player_order:
+            x_player.queue_in.put(['display_message', '%s has chosen %s as trump for this round' %
+                                   (l_player.name, self.gameplay_obj.trump)])
+            x_player.queue_in.put(['send_line_separator'])
+
     def _setup_round_teams(self, trump_chooser):
         if trump_chooser in self.team1:
-            self._round_off_team = self.team1
-            self._round_def_team = self.team2
+            self.gameplay_obj.round_off_team = self.team1
+            self.gameplay_obj.round_def_team = self.team2
         else:
-            self._round_off_team = self.team2
-            self._round_def_team = self.team1
+            self.gameplay_obj.round_off_team = self.team2
+            self.gameplay_obj.round_def_team = self.team1
 
-    def adjust_round_order(self):
+    def build_round_order(self):
         for l_player in self.player_order:
-            if l_player in self._round_off_team:
-                self._round_turn_order.append(l_player)
-            elif l_player in self._round_def_team:
-                self._round_turn_order.append(l_player)
-        module_logger.info('Round turn order: ' + ','.join([x.name for x in self._round_turn_order]))
+            if l_player in self.gameplay_obj.round_off_team:
+                self.gameplay_obj.round_turn_order.append(l_player)
+            elif l_player in self.gameplay_obj.round_def_team:
+                self.gameplay_obj.round_turn_order.append(l_player)
+        module_logger.info('Round turn order: ' + ','.join([x.name for x in self.gameplay_obj.round_turn_order]))
+
+    def calc_points(self):
+        defend_alone = False
+        offend_alone = False
+        if len(self.gameplay_obj.round_def_team) == 1:
+            defend_alone = True
+        if len(self.gameplay_obj.round_off_team) == 1:
+            offend_alone = True
+        if self.gameplay_obj.round_off_tricks > self.gameplay_obj.round_def_tricks:
+            tricks = self.gameplay_obj.round_off_tricks
+            if tricks == 5:
+                if offend_alone:
+                    points = 4
+                else:
+                    points = 2
+            elif tricks >= 3:
+                points = 1
+            if self.gameplay_obj.round_off_team[1] in self.team1:
+                self.team1_points += points
+                tally_string = '%s and %s gained %d points for a total of %d' % (self.team1[0].name, self.team1[1].name,
+                                                                                 points, self.team1_points)
+            else:
+                self.team2_points += points
+                tally_string = '%s and %s gained %d points for a total of %d' % (self.team2[0].name, self.team2[1].name,
+                                                                                 points, self.team2_points)
+        else:
+            tricks = self.gameplay_obj.round_def_tricks
+            if tricks == 5 and defend_alone:
+                points = 4
+            elif tricks >= 3:
+                points = 2
+            if self.gameplay_obj.round_def_team[1] in self.team1:
+                self.team1_points += points
+                tally_string = '%s and %s gained %d points for a total of %d' % (self.team1[0].name, self.team1[1].name,
+                                                                                 points, self.team1_points)
+            else:
+                self.team2_points += points
+                tally_string = '%s and %s gained %d points for a total of %d' % (self.team2[0].name, self.team2[1].name,
+                                                                                 points, self.team2_points)
+        for l_player in self.player_order:
+            l_player.queue_in.put(['display_message', tally_string])
+
+    def pick_next_dealer(self):
+        self.dealer = self.player_order[0]
+        message = 'Onto the next round, the dealer will be: %s ' % self.dealer.name
+        for l_player in self.player_order:
+            l_player.queue_in.put(['display_message', message])
+
+class Gameplay:
+    def __init__(self, full_player_order):
+        self.full_player_order = full_player_order
+        self.round_off_team = None
+        self.round_def_team = None
+        self.round_off_tricks = 0
+        self.round_def_tricks = 0
+        self.round_turn_order = []
+        self.round_kitty = []
+        self.discard_pile = []
+        self.trump = ''
+        self.left_bower = None
+        self.right_bower = None
+        
+    def start(self):
+        self.set_bowers()
+        trick_count = 0
+        while trick_count < 5:
+            trick, lead_suit = self.play_cards()
+            winner = self.who_won(trick, lead_suit)
+            self.add_tricks(winner)
+            self.shift_round_order(winner)
+            trick_count += 1
+        self.discard_pile += self.round_kitty
+        self.round_kitty = []
+        # round play complete
+
+    def set_bowers(self):
+        self.right_bower = Cards.Card(self.trump, 'Jack', 11)
+        if self.trump == 'Hearts':
+            self.left_bower = Cards.Card('Diamonds', 'Jack', 11)
+        elif self.trump == 'Diamonds':
+            self.left_bower = Cards.Card('Hearts', 'Jack', 11)
+        elif self.trump == 'Spades':
+            self.left_bower = Cards.Card('Clubs', 'Jack', 11)
+        else:
+            self.left_bower = Cards.Card('Spades', 'Jack', 11)
+
+    def play_cards(self):
+        trick = {}
+        lead_suit = None
+        for l_player in self.round_turn_order:
+            card_played = self.choose_card(l_player, lead_suit)
+            for x_player in self.full_player_order:
+                x_player.queue_in.put(['display_message', '%s has played %s of %s' %
+                                       (l_player.name, card_played.d_value, card_played.suit)])
+            if not lead_suit:
+                lead_suit = card_played.suit
+            trick[l_player] = card_played
+        return trick, lead_suit
+
+    def who_won(self, trick_dict, lead_suit):
+        winner = None
+        for player, card in trick_dict.items():
+            if card.suit == self.right_bower.suit and card.value == self.right_bower.value:
+                winner = [player, card]
+                break
+            if not winner:
+                winner = [player, card]
+            else:
+                if winner[1].suit == self.left_bower.suit and winner[1].value == self.left_bower.value:
+                    continue
+                if winner[1].suit == self.trump:
+                    if card.suit == self.trump:
+                        if card.value > winner[1].value:
+                            winner = [player, card]
+                else:
+                    if card.suit == self.trump:
+                        winner = [player, card]
+                    elif card.value > winner[1].value:
+                        winner = [player, card]
+            self.discard_pile.append(card)
+        for x_player in self.full_player_order:
+            x_player.queue_in.put(['display_message', '%s won with %s of %s' %
+                                   (winner[0].name, winner[1].d_value, winner[1].suit)])
+        return winner
+
+    def choose_card(self, l_player, lead_suit):
+        while True:
+            if not lead_suit:
+                play_string = 'Which card do you want to play [enter the number]: \n' + \
+                              '\n'.join(['[%d] ' % (l_player.hand.index(x)) + x.d_value + ' of ' +
+                                        x.suit for x in l_player.hand]) + '\n'
+            else:
+                if lead_suit == self.trump:
+                    # we want to ensure the left bower is accounted for.
+                    options_list = ['[%d] ' % (l_player.hand.index(x)) + x.d_value + ' of ' +
+                                    x.suit for x in l_player.hand if x.suit == lead_suit or
+                                   (x.suit == self.left_bower.suit and x.d_value == self.left_bower.d_value)]
+                    if not options_list:
+                        # should account for a player who doesnt have to follow suit
+                        play_string = 'Which card do you want to play [enter the number]: \n' + \
+                                      '\n'.join(['[%d] ' % (l_player.hand.index(x)) + x.d_value + ' of ' +
+                                                 x.suit for x in l_player.hand]) + '\n'
+                    else:
+                        play_string = 'Which card do you want to play (must follow suit) [enter the number]: \n' + \
+                                  '\n'.join(options_list)
+                else:
+                    options_list = ['[%d] ' % (l_player.hand.index(x)) + x.d_value + ' of ' +
+                                             x.suit for x in l_player.hand if x.suit == lead_suit]
+                    if not options_list:
+                        # should account for a player who doesnt have to follow suit
+                        play_string = 'Which card do you want to play [enter the number]: \n' + \
+                                      '\n'.join(['[%d] ' % (l_player.hand.index(x)) + x.d_value + ' of ' +
+                                                 x.suit for x in l_player.hand]) + '\n'
+                    else:
+                        play_string = 'Which card do you want to play (must follow suit) [enter the number]: \n' + \
+                            '\n'.join(options_list)
+            options = re.findall('\d+', play_string)
+            l_player.queue_in.put(['require_input', play_string])
+            l_player_resp = l_player.queue_out.get()
+            if l_player_resp in options:
+                card_played = l_player.hand.pop(int(l_player_resp))
+                break
+
+        return card_played
+
+    def add_tricks(self, winner):
+        if winner in self.round_def_team:
+            self.round_def_tricks += 1
+        else:
+            self.round_off_tricks += 1
+
+    def shift_round_order(self, winner):
+        module_logger.info('Current round player order: ' + ','.join([x.name for x in self.round_turn_order]))
+        while self.round_turn_order.index(winner) != 1:
+            # this while statement runs till the winner of the last round is first to go on the next one.
+            shifting = self.round_turn_order.pop(0)
+            self.round_turn_order.append(shifting)
+        module_logger.info('Updated round player order: ' + ','.join([x.name for x in self.round_turn_order]))
 
 
 if __name__ == '__main__':
     print('Euchre game functions. run server.py')
+
+# todo
+# - account for no one picking first trump option. (setup moving to next dealer)

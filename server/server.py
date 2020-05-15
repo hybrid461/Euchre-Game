@@ -14,6 +14,7 @@ card_discard_pile = []
 header_length = 10
 dealer = ''
 player_threads = []
+gameover = False
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
 # logging.basicConfig(level=logging.DEBUG, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
@@ -60,20 +61,19 @@ def player_handle(player_obj, l_condition):
     player_obj.send_data('display_message',
                          'Teams have been chosen and are as follows, team1: %s and %s. team2: %s and %s.' %
                          (euchre.team1[0].name, euchre.team1[1].name, euchre.team2[0].name, euchre.team2[1].name))
-    while True:
-        if not player_obj.queue_in.empty():
-            task_from_main = player_obj.queue_in.get()
-            if task_from_main[0] == 'display_message':
-                player_obj.send_data(task_from_main[0], task_from_main[1])
-            elif task_from_main[0] == 'require_input':
-                player_obj.send_data(task_from_main[0], task_from_main[1])
-                player_obj.queue_out.put(player_obj.receive_response())
-            elif task_from_main[0] == 'send_line_separator':
-                player_obj.send_line_separator()
-            else:
-                raise Exception('Received a queue_in item i have no idea what to do with!: %s' % task_from_main)
+    while not player_obj.queue_in.empty() or not gameover:
+        task_from_main = player_obj.queue_in.get()
+        if task_from_main[0] == 'display_message':
+            player_obj.send_data(task_from_main[0], task_from_main[1])
+        elif task_from_main[0] == 'require_input':
+            player_obj.send_data(task_from_main[0], task_from_main[1])
+            player_obj.queue_out.put(player_obj.receive_response())
+        elif task_from_main[0] == 'send_line_separator':
+            player_obj.send_line_separator()
+        else:
+            raise Exception('Received a queue_in item i have no idea what to do with!: %s' % task_from_main)
 
-
+    player_obj.send_data('display_message', 'Thank you for playing. Goodbye.')
     player_obj.socket_object.close()
 
 
@@ -163,14 +163,8 @@ with condition:
     condition.wait()
 
 euchre.start_game()
-euchre.start_round()
 
-while True:
-
-    time.sleep(5)
+gameover = True
+logging.info('gameover')
 # todo
-# - account for no one picking first trump option
-# - dont forget option to defend alone -- needs testing.
-# -- in pick_trump, set the off/def teams
-# -- change go_alone so that it checks with all players once trump is decided, starting with the player that chose trump.
 # - at some point, some form of sessionizing the players.
