@@ -16,8 +16,8 @@ dealer = ''
 player_threads = []
 gameover = False
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
-# logging.basicConfig(level=logging.DEBUG, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
+# logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
 
 
 def player_handle(player_obj, l_condition):
@@ -147,12 +147,12 @@ conn_handler.start()
 logging.debug('connection_handler thread started')
 
 # check that all 4 players have names
-player_name_count = 0
+player_hp_count = 0
 
-while player_name_count < 4:
+while player_hp_count < 4:
     logging.info('watching player count')
-    player_name_count = sum(x.name != '' for x in euchre.player_order)
-    logging.info('Players connected: %d\n' % player_name_count)
+    player_hp_count = sum(x.hand_preference != '' for x in euchre.player_order)
+    logging.info('Players connected: %d\n' % player_hp_count)
     time.sleep(3)
 with condition:
     condition.notify_all()

@@ -34,7 +34,7 @@ class Player:
                 return None
             data += packet
         data = data.decode()
-        self.logger.info('Received request: %s from: %s' % (data, self.address))
+        self.logger.debug('Received request: %s from: %s' % (data, self.address))
         return data
 
     def send_data(self, instruction, message):
@@ -51,7 +51,7 @@ class Player:
         data_header = f'{len(data):<{self.sock_header_length}}'
         msg = data_header + data
         self.socket_object.send(msg.encode())
-        self.logger.info('Sent data: %s to: %s. length: %d encode_len: %d' % (msg, self.address,
+        self.logger.debug('Sent data: %s to: %s. length: %d encode_len: %d' % (msg, self.address,
                                                                         len(msg), len(msg.encode())))
 
     def send_line_separator(self, newlines=True):
