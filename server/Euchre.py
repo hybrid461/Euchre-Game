@@ -55,7 +55,7 @@ class Euchre:
         module_logger.info('Dealer is: ' + self.dealer.name)
 
     def start_round(self):
-        while self.team1_points < 10 or self.team2_points < 10:
+        while self.team1_points < 10 and self.team2_points < 10:
             self.gameplay_obj = Gameplay(self.player_order)
             self.set_player_order()
             self.deal()
@@ -79,7 +79,7 @@ class Euchre:
                 self.gameplay_obj.discard_pile = []
                 self.pick_next_dealer()
 
-        if self.team1_points > 10:
+        if self.team1_points >= 10:
             message = 'GAMEOVER. Congratulations to %s and %s for winning with %d points.' % (self.team1[0].name,
                                                                                              self.team1[1].name,
                                                                                              self.team1_points)
@@ -249,6 +249,7 @@ class Euchre:
 
     def go_alone_question(self, team_list):
         for l_player in team_list:
+            l_player.display_hand()
             l_player.queue_in.put(['require_input', 'Do you wish to play alone this round? [1 = no, 2 = yes] '])
             go_alone_response = l_player.queue_out.get()
             if go_alone_response == '1':
@@ -303,12 +304,10 @@ class Euchre:
                 raise Exception('gameplay object round tricks are incorrect')
             if self.gameplay_obj.round_off_team[0] in self.team1:
                 self.team1_points += points
-                tally_string = '%s and %s gained %d points for a total of %d' % (self.team1[0].name, self.team1[1].name,
-                                                                                 points, self.team1_points)
+                tally_string = '%s and %s gained %d points' % (self.team1[0].name, self.team1[1].name, points)
             else:
                 self.team2_points += points
-                tally_string = '%s and %s gained %d points for a total of %d' % (self.team2[0].name, self.team2[1].name,
-                                                                                 points, self.team2_points)
+                tally_string = '%s and %s gained %d points' % (self.team2[0].name, self.team2[1].name, points)
         else:
             tricks = self.gameplay_obj.round_def_tricks
             if tricks == 5 and defend_alone:
@@ -317,12 +316,14 @@ class Euchre:
                 points = 2
             if self.gameplay_obj.round_def_team[1] in self.team1:
                 self.team1_points += points
-                tally_string = '%s and %s gained %d points for a total of %d' % (self.team1[0].name, self.team1[1].name,
-                                                                                 points, self.team1_points)
+                tally_string = '%s and %s gained %d points' % (self.team1[0].name, self.team1[1].name, points)
             else:
                 self.team2_points += points
-                tally_string = '%s and %s gained %d points for a total of %d' % (self.team2[0].name, self.team2[1].name,
-                                                                                 points, self.team2_points)
+                tally_string = '%s and %s gained %d points' % (self.team2[0].name, self.team2[1].name, points)
+
+        tally_string += '\nCurrent total:\n%s and %s: %d\n%s and %s: %d' % (self.team1[0].name, self.team1[1].name,
+                                                                           self.team1_points, self.team2[0].name,
+                                                                            self.team2[1].name, self.team2_points)
         for l_player in self.player_order:
             l_player.queue_in.put(['display_message', tally_string])
 
@@ -330,7 +331,6 @@ class Euchre:
         self.dealer = self.player_order[0]
         message = 'Onto the next round, the dealer will be: %s ' % self.dealer.name
         for l_player in self.player_order:
-            l_player.queue_in.put(['send_line_separator'])
             l_player.queue_in.put(['display_message', message])
             l_player.queue_in.put(['send_line_separator'])
 
@@ -384,6 +384,8 @@ class Gameplay:
                     lead_suit = self.trump
                 else:
                     lead_suit = card_played.suit
+                for x_player in self.full_player_order:
+                    x_player.queue_in.put(['display_message', 'Players must follow suit. Lead suit: ' + lead_suit])
             trick[l_player] = card_played
         return trick, lead_suit
 
@@ -414,8 +416,13 @@ winner[card.suit]: %s ''' % (winner[0].name, winner[1].d_value, winner[1].suit))
                     if card.suit == self.trump:
                         if card.value > winner[1].value:
                             winner = [player, card]
+                    elif card.suit == self.left_bower.suit and card.value == self.left_bower.value and \
+                            winner[1].value != self.right_bower.value:
+                        # ensure left bower beats out other trump leaders.
+                        winner = [player, card]
                 else: # current trick winner is not trump
-                    if card.suit == self.trump: # any trump beats not trump
+                    if card.suit == self.trump or card.value == self.left_bower.value \
+                            and card.suit == self.left_bower.suit: # any trump beats not trump
                         winner = [player, card]
                     elif card.value > winner[1].value and winner[1].suit == card.suit:
                         # if offsuit matches and is higher value
@@ -481,6 +488,7 @@ winner[card.suit]: %s ''' % (winner[0].name, winner[1].d_value, winner[1].suit))
             message += '\n%s and %s: %d' % \
                       (self.round_off_team[0].name, self.round_off_team[0].teammate.name, self.round_off_tricks)
             x_player.queue_in.put(['display_message', message])
+            x_player.queue_in.put(['send_line_separator'])
 
     def shift_round_order(self, winner):
         module_logger.info('Current round player order: ' + ','.join([x.name for x in self.round_turn_order]))
@@ -495,10 +503,3 @@ if __name__ == '__main__':
     print('Euchre game functions. run server.py')
 
 # todo
-# - fix left bower being offered as an option for following suit. TEST
-# - fix left bower not winning offsuit lead. not sure. debugging log added.
-# - deck array not properly assembled before dealing. maybe fixed
-# - when player chooses to go alone, and others are told, the others are told they went alone. fixed.
-# - right bower is shown as an option when player has to follow suit.
-# - different offsuits were winning just based on value, didnt care if suit matched. maybe fixed?
-# - display overall score each round

@@ -7,7 +7,7 @@ import Player
 import Euchre
 import logging
 
-listen_ip = '192.168.50.128'
+listen_ip = '192.168.20.178'
 listen_port = 9999
 all_players_connected = False
 card_discard_pile = []
@@ -16,8 +16,8 @@ dealer = ''
 player_threads = []
 gameover = False
 
-# logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
-logging.basicConfig(level=logging.DEBUG, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
+# logging.basicConfig(level=logging.DEBUG, format='%(levelname)s - %(threadName)s %(asctime)s: %(message)s')
 
 
 def player_handle(player_obj, l_condition):
@@ -115,7 +115,7 @@ def choose_teams(player_obj):
 
 def connection_handler(l_condition):
     player_count = 0
-    while True:
+    while not gameover:
         # start loop to accept players connections
         client, address = server.accept()
         logging.info('[*] Accepted connection from: %s:%d' % (address[0], address[1]))

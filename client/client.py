@@ -4,6 +4,8 @@ import socket
 import sys
 import json
 
+server_ip = '192.168.20.178'
+server_port = 9999
 
 def receive_data(client, header_length):
     response_header = client.recv(header_length)
@@ -23,8 +25,6 @@ def receive_data(client, header_length):
 
 
 def connect_to_server():
-    server_ip = '192.168.50.128'
-    server_port = 9999
     # create the socket object
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
