@@ -3,6 +3,7 @@
 import socket
 import sys
 import json
+import ssl
 
 server_ip = '192.168.20.178'
 server_port = 9999
@@ -27,12 +28,17 @@ def receive_data(client, header_length):
 def connect_to_server():
     # create the socket object
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ssl_context.options |= ssl.OP_NO_TLSv1
+    ssl_context.options |= ssl.OP_NO_TLSv1_1
+    ssl_context.load_cert_chain('/home/ryan/certs/client.crt', keyfile='/home/ryan/certs/client.key')
+    ssl_context.load_verify_locations('/home/ryan/certs/server.crt')
     # connect the client to the game server
     try:
-        client.connect((server_ip, server_port))
+        connection = ssl_context.wrap_socket(client, server_hostname='example.com')
+        connection.connect((server_ip, server_port))
         print('Connected to server %s on port %s' % (server_ip, server_port))
-        return client
+        return connection
     except Exception as e:
         print('Failed to connect to game server. Error: %s' % e)
         sys.exit()

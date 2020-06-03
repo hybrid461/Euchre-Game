@@ -6,6 +6,7 @@ import time
 import Player
 import Euchre
 import logging
+import ssl
 
 listen_ip = '192.168.20.178'
 listen_port = 9999
@@ -114,10 +115,21 @@ def choose_teams(player_obj):
 
 
 def connection_handler(l_condition):
+    logging.debug('connection_handler thread started')
     player_count = 0
+    ssl_context = ssl.SSLContext(protocol=ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.options |= ssl.OP_NO_TLSv1
+    ssl_context.options |= ssl.OP_NO_TLSv1_1
+    logging.debug('SSL context options: ' + str(ssl_context.options))
+    ssl_context.load_cert_chain('/home/ryan/certs/server.crt', keyfile='/home/ryan/certs/server.key')
+    # ssl_context.load_verify_locations('/home/ryan/certs/client.crt')
+    logging.debug('Cert chain loaded')
     while not gameover:
         # start loop to accept players connections
-        client, address = server.accept()
+        # with ssl_context.wrap_socket(server, server_side=True) as ssock:
+        logging.debug('[*] Waiting to accept connection')
+        new_socket, address = server.accept()
+        client = ssl_context.wrap_socket(new_socket, server_side=True)
         logging.info('[*] Accepted connection from: %s:%d' % (address[0], address[1]))
         thread_name = 'player%d_thread' % (player_count + 1)
         l_player = Player.Player(client, address[0])
@@ -138,13 +150,14 @@ logging.info('Euchre server starting!')
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((listen_ip, listen_port))
 server.listen(5)
+
 logging.info('Listening on %s:%d' % (listen_ip, listen_port))
 
 condition = threading.Condition()
 euchre = Euchre.Euchre()
 conn_handler = threading.Thread(target=connection_handler, args=(condition,), name='conn_thread')
 conn_handler.start()
-logging.debug('connection_handler thread started')
+
 
 # check that all 4 players have names
 player_hp_count = 0
